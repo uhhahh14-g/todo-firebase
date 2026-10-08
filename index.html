@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>할 일 목록</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <p class="eyebrow">Todo</p>
+        <h1>할 일 목록</h1>
+        <p class="subtitle">추가하고, 고치고, 지울 수 있어요.</p>
+      </header>
+
+      <form id="todo-form" class="todo-form" autocomplete="off">
+        <label class="sr-only" for="todo-input">할 일 입력</label>
+        <input
+          id="todo-input"
+          name="title"
+          type="text"
+          placeholder="할 일을 입력하세요"
+          maxlength="120"
+          required
+        />
+        <button type="submit">추가</button>
+      </form>
+
+      <section class="panel" aria-labelledby="list-heading">
+        <div class="panel-header">
+          <h2 id="list-heading">목록</h2>
+          <p id="todo-count" class="count">0개</p>
+        </div>
+        <ul id="todo-list" class="todo-list"></ul>
+        <p id="empty-state" class="empty">아직 할 일이 없습니다.</p>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
