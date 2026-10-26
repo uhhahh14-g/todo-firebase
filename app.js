@@ -1,52 +1,32 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-import {
-  getDatabase,
-  onValue,
-  push,
-  ref,
-  remove,
-  set,
-  update,
-} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
+// Node.js Express 백엔드 API 주소
+const API_BASE_URL = 'http://localhost:5000/api/todos';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCJloUgYrvZ7-AciCXCoAKxda9Ww7WQ9Zc",
-  authDomain: "todo-firebase-99bd5.firebaseapp.com",
-  projectId: "todo-firebase-99bd5",
-  storageBucket: "todo-firebase-99bd5.firebasestorage.app",
-  messagingSenderId: "727550147592",
-  appId: "1:727550147592:web:d0ab9538305e697f9ce5bd",
-  databaseURL: "https://todo-firebase-99bd5-default-rtdb.firebaseio.com/",
-};
-
-const app = initializeApp(firebaseConfig);
-const database = getDatabase(app);
-const todosRef = ref(database, "todos");
-
-const form = document.getElementById("todo-form");
-const input = document.getElementById("todo-input");
-const list = document.getElementById("todo-list");
-const emptyState = document.getElementById("empty-state");
-const countEl = document.getElementById("todo-count");
+const form = document.getElementById('todo-form');
+const input = document.getElementById('todo-input');
+const list = document.getElementById('todo-list');
+const emptyState = document.getElementById('empty-state');
+const countEl = document.getElementById('todo-count');
 const submitButton = form.querySelector("button[type='submit']");
 
 let todos = [];
 
-onValue(
-  todosRef,
-  (snapshot) => {
-    const data = snapshot.val() || {};
-    todos = Object.entries(data)
-      .map(([id, todo]) => ({ id, ...todo }))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+// [1] 할 일 목록 가져오기 (GET)
+async function fetchTodos() {
+  try {
+    const response = await fetch(API_BASE_URL);
+    if (!response.ok) {
+      throw new Error(`서버 응답 오류 (${response.status})`);
+    }
+    const result = await response.json();
+    todos = result.data || [];
     render();
-  },
-  (error) => {
-    showDatabaseError(error);
+  } catch (error) {
+    showError('할 일 목록을 불러오지 못했습니다.', error);
   }
-);
+}
 
-form.addEventListener("submit", async (event) => {
+// [2] 할 일 추가하기 (POST)
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const title = input.value.trim();
   if (!title) return;
@@ -54,103 +34,156 @@ form.addEventListener("submit", async (event) => {
   submitButton.disabled = true;
 
   try {
-    const newTodoRef = push(todosRef);
-    const todo = {
-      title,
-      done: false,
-      createdAt: Date.now(),
-    };
+    const response = await fetch(API_BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title }),
+    });
 
-    await set(newTodoRef, todo);
-    input.value = "";
+    if (!response.ok) {
+      const errData = await response.json();
+      throw new Error(errData.message || '할 일 추가 실패');
+    }
+
+    input.value = '';
     input.focus();
+    await fetchTodos(); // 최신 목록 새로고침
   } catch (error) {
-    showDatabaseError(error);
+    showError('할 일을 추가하지 못했습니다.', error);
   } finally {
     submitButton.disabled = false;
   }
 });
 
-list.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-action]");
+// [3] 목록 내 버튼 클릭 처리 (삭제 / 수정 / 저장 / 취소)
+list.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-action]');
   if (!button) return;
 
-  const item = button.closest(".todo-item");
+  const item = button.closest('.todo-item');
   const id = item.dataset.id;
   const action = button.dataset.action;
 
-  if (action === "delete") {
+  // 삭제 (DELETE)
+  if (action === 'delete') {
+    if (!confirm('이 할 일을 삭제하시겠습니까?')) return;
+
     try {
-      await remove(ref(database, `todos/${id}`));
+      const response = await fetch(`${API_BASE_URL}/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('할 일 삭제에 실패했습니다.');
+      }
+
+      await fetchTodos();
     } catch (error) {
-      showDatabaseError(error);
+      showError('삭제 중 오류가 발생했습니다.', error);
     }
     return;
   }
 
-  if (action === "edit") {
+  // 수정 모드 진입
+  if (action === 'edit') {
     startEdit(item, id);
   }
 
-  if (action === "save") {
-    const nextTitle = item.querySelector(".edit-input").value.trim();
+  // 수정 내용 저장 (PUT)
+  if (action === 'save') {
+    const nextTitle = item.querySelector('.edit-input').value.trim();
     if (!nextTitle) return;
+
     try {
-      await update(ref(database, `todos/${id}`), { title: nextTitle });
+      const response = await fetch(`${API_BASE_URL}/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+
+      if (!response.ok) {
+        throw new Error('할 일 수정 저장에 실패했습니다.');
+      }
+
+      await fetchTodos();
     } catch (error) {
-      showDatabaseError(error);
+      showError('수정 중 오류가 발생했습니다.', error);
     }
   }
 
-  if (action === "cancel") {
+  // 수정 취소
+  if (action === 'cancel') {
     render();
   }
 });
 
-list.addEventListener("change", async (event) => {
+// [4] 완료 체크박스 토글 (PUT)
+list.addEventListener('change', async (event) => {
   const checkbox = event.target.closest("input[type='checkbox']");
   if (!checkbox) return;
-  const id = checkbox.closest(".todo-item").dataset.id;
+
+  const item = checkbox.closest('.todo-item');
+  const id = item.dataset.id;
+  const completed = checkbox.checked;
+
   try {
-    await update(ref(database, `todos/${id}`), {
-      done: checkbox.checked,
+    const response = await fetch(`${API_BASE_URL}/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ completed }),
     });
+
+    if (!response.ok) {
+      throw new Error('완료 상태 변경 실패');
+    }
+
+    await fetchTodos();
   } catch (error) {
-    checkbox.checked = !checkbox.checked;
-    showDatabaseError(error);
+    checkbox.checked = !completed; // 실패 시 체크박스 롤백
+    showError('상태 변경 중 오류가 발생했습니다.', error);
   }
 });
 
+// [5] 인라인 수정 모드 UI
 function startEdit(item, id) {
-  const todo = todos.find((entry) => entry.id === id);
-  item.classList.add("editing");
-  item.querySelector(".title").outerHTML = `
+  const todo = todos.find((entry) => entry._id === id);
+  if (!todo) return;
+
+  item.classList.add('editing');
+  item.querySelector('.title').outerHTML = `
     <input class="edit-input" type="text" maxlength="120" value="${escapeAttr(todo.title)}" />
   `;
-  item.querySelector(".actions").innerHTML = `
+  item.querySelector('.actions').innerHTML = `
     <button type="button" data-action="save">저장</button>
     <button type="button" data-action="cancel">취소</button>
   `;
-  const editInput = item.querySelector(".edit-input");
+  const editInput = item.querySelector('.edit-input');
   editInput.focus();
   editInput.setSelectionRange(editInput.value.length, editInput.value.length);
 
-  editInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+  editInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
       item.querySelector('[data-action="save"]').click();
     }
-    if (event.key === "Escape") {
+    if (event.key === 'Escape') {
       render();
     }
   });
 }
 
+// [6] 화면 렌더링
 function render() {
   list.innerHTML = todos
     .map(
       (todo) => `
-        <li class="todo-item ${todo.done ? "done" : ""}" data-id="${todo.id}">
-          <input type="checkbox" ${todo.done ? "checked" : ""} aria-label="완료" />
+        <li class="todo-item ${todo.completed ? 'done' : ''}" data-id="${todo._id}">
+          <input type="checkbox" ${todo.completed ? 'checked' : ''} aria-label="완료" />
           <p class="title">${escapeHtml(todo.title)}</p>
           <div class="actions">
             <button type="button" data-action="edit">수정</button>
@@ -159,25 +192,29 @@ function render() {
         </li>
       `
     )
-    .join("");
+    .join('');
 
-  emptyState.classList.toggle("visible", todos.length === 0);
+  emptyState.classList.toggle('visible', todos.length === 0);
   countEl.textContent = `${todos.length}개`;
 }
 
-function showDatabaseError(error) {
-  console.error("Firebase Realtime Database 오류:", error);
-  alert(`Firebase 오류: ${error.message}`);
+// [7] 에러 안내
+function showError(message, error) {
+  console.error(message, error);
+  alert(`${message}\n\n※ 백엔드 서버(http://localhost:5000)가 실행 중인지 확인해주세요.`);
 }
 
 function escapeHtml(value) {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 function escapeAttr(value) {
-  return escapeHtml(value).replaceAll("'", "&#39;");
+  return escapeHtml(value).replaceAll("'", '&#39;');
 }
+
+// 첫 로딩 시 할 일 목록 가져오기 실행
+fetchTodos();
